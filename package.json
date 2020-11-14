@@ -10,9 +10,13 @@
     "foreman": "^3.0.1",
     "throng": "^4.0.0",
     "express": "^4.9.8",
-    "axios":"^0.20.0"
+    "axios":"^0.20.0",
+    "arraybuffer-to-string":"^1.0.2"
   },
   "scripts": {
     "start": "nf start"
+  },
+  "engines": {
+    "node": "14.10.1"
   }
 }
