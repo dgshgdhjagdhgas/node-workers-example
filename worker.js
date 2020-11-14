@@ -12,6 +12,8 @@ function start() {
 
   workQueue.process(async (job,done) => {
     const queryParams = job.data
+    console.log(job.data);
+    
     if (!queryParams.acc || !queryParams.n || !queryParams.src) {
       done('some required params missing')
       return
