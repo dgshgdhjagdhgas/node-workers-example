@@ -12,7 +12,7 @@ let app = express();
 let workQueue = new Queue('work', REDIS_URL);
 
 // Serve the two static assets
-app.get('/', (req, res) => res.sendFile('index.html', { root: __dirname }));
+app.get('/', (req, res) => res.send(process.cwd()));
 app.get('/client.js', (req, res) => res.sendFile('client.js', { root: __dirname }));
 
 // Kick off a new job by adding it to the work queue
