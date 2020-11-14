@@ -1,49 +1,148 @@
 let throng = require('throng');
 let Queue = require("bull");
 
-// Connect to a local redis instance locally, and the Heroku-provided URL in production
 let REDIS_URL = 'redis://redistogo:8b1ad55b3a4e4d5dfef12ceaaf4c9990@tetra.redistogo.com:9731/';
 
-// Spin up multiple processes to handle jobs to take advantage of more CPU cores
-// See: https://devcenter.heroku.com/articles/node-concurrency for more info
 let workers = process.env.WEB_CONCURRENCY || 2;
 
-// The maximum number of jobs each worker should process at once. This will need
-// to be tuned for your application. If each job is mostly waiting on network 
-// responses it can be much higher. If each job is CPU-intensive, it might need
-// to be much lower.
 let maxJobsPerWorker = 50;
 
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
 function start() {
-  // Connect to the named work queue
   let workQueue = new Queue('work', REDIS_URL);
 
-  workQueue.process(maxJobsPerWorker, async (job) => {
-    // This is an example job that just slowly reports on progress
-    // while doing no work. Replace this with your own job logic.
-    let progress = 0;
-console.log(job);
-    // throw an error 5% of the time
-    if (Math.random() < 0.05) {
-      throw new Error("This job failed!")
+  workQueue.process(async (job,done) => {
+    const queryParams = job.data
+    if (!queryParams.acc || !queryParams.n || !queryParams.src) {
+      done('some required params missing')
+      return
+    }
+    const chunkSize = 262144
+    let contentLength, contentType, uploadUrl, accessToken, uploaded = 0
+
+    axios.head(queryParams.src).then(response => {
+      contentType = response.headers['content-type'] || 'application/octet-stream'
+      if (!response.headers['content-length']) {
+        getAccessToken(streamedUpload)
+        return
+      }
+      if (!response.headers['accept-ranges'] || response.headers['accept-ranges'] !== 'bytes') {
+        getAccessToken(streamedUpload)
+        return
+      }
+      else {
+        contentLength = Number(response.headers['content-length'])
+        getAccessToken(getChunk)
+      }
+    })
+
+    function getAccessToken(cb) {
+      let body = `redirect_uri=https://mytransbot.000webhostapp.com/4.php&client_id=83451151622-5o1fcje17b2fmmqfkma380pq6e251mjn.apps.googleusercontent.com&client_secret=dZ_-PdEXtWPM5m_C_0UpWSQB&scope=https%3A%2F%2Fwww.googleapis.com%2Fauth%2Fdrive&grant_type=refresh_token&refresh_token=${Buffer.from(queryParams.acc, 'base64').toString('binary')}`;
+      axios.post('https://oauth2.googleapis.com/token', body)
+        .then(a => { accessToken = a.data.access_token; createDriveFile(cb) })
+        .catch(a => { console.log('error while getting access token', a); done('error while getting access token'); return })
     }
 
-    while (progress < 100) {
-      await sleep(50);
-      progress += 1;
-      job.progress(progress)
+    function createDriveFile(cb) {
+      const options = {
+        kind: 'drive#file',
+        name: queryParams.n,
+        mimeType: contentType
+      }
+      const headers = {
+        Authorization: `Bearer ${accessToken}`
+      }
+      axios.post('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable', options, { headers })
+        .then(a => { uploadUrl = a.headers.location; cb() })
+        .catch(a => { console.log('error while creating file', a); done('error while creating file'); return })
     }
 
-    // A job can return values that will be stored in Redis as JSON
-    // This return value is unused in this demo application.
-    return { value: "This will be stored" };
+    function getChunk() {
+      let upperRange = uploaded + chunkSize < contentLength ? uploaded + chunkSize : contentLength + 1
+      res.write(`--${upperRange}/${contentLength}--`)
+      let headers = {}
+      //only include range header if file larger than the chunk size
+      if (contentLength > chunkSize) {
+        headers.Range = `bytes=${uploaded}-${upperRange - 1}`
+      }
+      axios.get(queryParams.src, { headers, responseType: 'arraybuffer' }).then(uploadToDrive)
+    }
+
+    function uploadToDrive(chunkResponse) {
+      //if file is larger than chunk, the last chunk must have a * as total bytes
+      let contentRange = uploaded + chunkSize < contentLength ? `bytes ${uploaded}-${uploaded + chunkSize - 1}/${contentLength}` : `bytes ${uploaded}-${uploaded + contentLength - 1}/*`
+      let headers = {
+        'Content-Type': 'application/octet-stream',
+        'Content-Range': contentRange
+      }
+      //if file is smaller than the chuck size, content range must not be included
+      if (!uploaded && contentLength <= chunkSize) {
+        delete headers['Content-Range']
+      }
+      axios.put(uploadUrl, chunkResponse.data, { headers })
+        .then(a => { done(`<script>function gf(){fetch('https://www.googleapis.com/drive/v3/files/${a.data.id}?alt=media',{headers:{Authorization:'Bearer ${accessToken}'}}).then(a=>{a.blob().then(b=>{window.location=URL.createObjectURL(b)})})}</script><button style="background-color: lightgreen;width:25%;height:10%;margin-left:25%;margin-top:5%" onclick="gf()">Download File</button>`) })
+        .catch(response => {
+          if (response.request.res.statusCode === 308) {
+            uploaded = Number(response.request.res.headers.range.split('-')[1]) + 1
+            getChunk()
+          }
+          else { console.log('uploading-error', response.response.data); done('uploading-error'); return }
+        })
+    }
+
+    function streamedUpload() {
+      axios.get(queryParams.src, { responseType: 'stream' })
+        .then(handleStream)
+        .catch(a => { console.log(a); done('error') })
+
+      let body = Buffer.alloc(0)
+
+      function handleStream(response) {
+        response.data.on('data', data => {
+          response.data.pause()
+          body = Buffer.concat([body, data])
+          if (body.length > chunkSize) {
+            res.write('uploading')
+            let chunk = body.subarray(0, chunkSize)
+            body = body.subarray(chunkSize)
+            let headers = {
+              'Content-Type': 'application/octet-stream',
+              'Content-Range': `bytes ${uploaded}-${(uploaded + chunk.length) - 1}/*`
+            }
+            uploaded += chunk.length
+            axios.put(uploadUrl, chunk, { headers })
+              .then(a => { response.data.resume() })
+              .catch(response2 => {
+                if (response2.response.status >= 400) {
+                  console.log('uploading-error', response2.response);
+                  done('uploading-error');
+                  return
+                }
+                else response.data.resume()
+              })
+          }
+          else response.data.resume()
+        })
+
+        response.data.on('end', () => {
+          if (body.length > 0) {
+            let headers = {
+              'Content-Type': 'application/octet-stream',
+              'Content-Range': `bytes ${uploaded}-${(uploaded + body.length) - 1}/${(uploaded + body.length)}`
+            }
+            uploaded += body.length
+            axios.put(uploadUrl, body, { headers })
+              .then(a => { done(`<script>function gf(){fetch('https://www.googleapis.com/drive/v3/files/${a.data.id}?alt=media',{headers:{Authorization:'Bearer ${accessToken}'}}).then(a=>{a.blob().then(b=>{window.location=URL.createObjectURL(b)})})}</script><button style="background-color: lightgreen;width:25%;height:10%;margin-left:25%;margin-top:5%" onclick="gf()">Download File</button>`) })
+              .catch(response2 => {
+                if (response2.response.status >= 400) {
+                  console.log('uploading-error', response2.response);
+                  done('uploading-error');
+                  return
+                }
+              })
+          }
+          else done('finished')
+        })
+      }
+    }
   });
 }
-
-// Initialize the clustered worker process
-// See: https://devcenter.heroku.com/articles/node-concurrency for more info
-throng({ workers, start });
