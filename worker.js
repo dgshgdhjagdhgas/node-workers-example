@@ -10,7 +10,7 @@ let maxJobsPerWorker = 50;
 function start() {
   let workQueue = new Queue('work', REDIS_URL);
 
-  workQueue.process(async (job,done) => {
+  workQueue.process(maxJobsPerWorker,async (job,done) => {
     const queryParams = job.data
     console.log(job.data);
     
