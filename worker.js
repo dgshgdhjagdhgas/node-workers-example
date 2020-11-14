@@ -1,5 +1,6 @@
 let throng = require('throng');
 let Queue = require("bull");
+let axios = require('axios')
 
 let REDIS_URL = 'redis://redistogo:8b1ad55b3a4e4d5dfef12ceaaf4c9990@tetra.redistogo.com:9731/';
 
