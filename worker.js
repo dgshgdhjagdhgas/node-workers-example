@@ -2,7 +2,7 @@ let throng = require('throng');
 let Queue = require("bull");
 
 // Connect to a local redis instance locally, and the Heroku-provided URL in production
-let REDIS_URL = process.env.REDIS_URL || "redis://127.0.0.1:6379";
+let REDIS_URL = 'redis://redistogo:8b1ad55b3a4e4d5dfef12ceaaf4c9990@tetra.redistogo.com:9731/';
 
 // Spin up multiple processes to handle jobs to take advantage of more CPU cores
 // See: https://devcenter.heroku.com/articles/node-concurrency for more info
