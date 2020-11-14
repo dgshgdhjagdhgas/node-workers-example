@@ -26,7 +26,7 @@ function start() {
     // This is an example job that just slowly reports on progress
     // while doing no work. Replace this with your own job logic.
     let progress = 0;
-
+console.log(job);
     // throw an error 5% of the time
     if (Math.random() < 0.05) {
       throw new Error("This job failed!")
