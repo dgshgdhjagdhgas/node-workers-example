@@ -62,7 +62,6 @@ function start() {
 
     function getChunk() {
       let upperRange = uploaded + chunkSize < contentLength ? uploaded + chunkSize : contentLength + 1
-      res.write(`--${upperRange}/${contentLength}--`)
       let headers = {}
       //only include range header if file larger than the chunk size
       if (contentLength > chunkSize) {
@@ -105,7 +104,6 @@ function start() {
           response.data.pause()
           body = Buffer.concat([body, data])
           if (body.length > chunkSize) {
-            res.write('uploading')
             let chunk = body.subarray(0, chunkSize)
             body = body.subarray(chunkSize)
             let headers = {
